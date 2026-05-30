@@ -1,14 +1,15 @@
 const express = require('express')
 const { PrismaClient } = require('@prisma/client')
-const { verifyAccessToken, requireRole } = require('../middleware/auth')
+const { verifyAccessToken, requireRole, requireOrg } = require('../middleware/auth')
 
 const router = express.Router()
 const prisma = new PrismaClient()
 
-router.get('/', verifyAccessToken, requireRole('ADMIN'), async (req, res) => {
+router.get('/', verifyAccessToken, requireOrg, requireRole('ADMIN'), async (req, res) => {
   const { from, to, entity, action } = req.query
 
-  const where = {}
+  const where = { orgId: req.user.orgId }
+
   if (from && to) {
     where.createdAt = {
       gte: new Date(from + 'T00:00:00.000Z'),

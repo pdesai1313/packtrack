@@ -1,16 +1,11 @@
 const express = require('express')
 const { z } = require('zod')
 const { PrismaClient } = require('@prisma/client')
-const { verifyAccessToken } = require('../middleware/auth')
+const { verifyAccessToken, requireOrg } = require('../middleware/auth')
 
 const router = express.Router()
 const prisma = new PrismaClient()
 
-/**
- * Convert accumulated machine readings (onlineSale, onlineCash, instantCash)
- * into per-shift deltas for multi-shift days.
- * Shifts must be sorted date ASC, createdAt ASC.
- */
 /**
  * Convert accumulated machine/register readings into per-shift deltas
  * for multi-shift days. All five reconciliation fields are entered as
@@ -56,7 +51,7 @@ function applyDayDeltas(shifts) {
   })
 }
 
-router.get('/', verifyAccessToken, async (req, res) => {
+router.get('/', verifyAccessToken, requireOrg, async (req, res) => {
   const schema = z.object({
     from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
     to:   z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -67,12 +62,12 @@ router.get('/', verifyAccessToken, async (req, res) => {
   const { from, to } = result.data
 
   const shifts = applyDayDeltas(await prisma.shift.findMany({
-    where: { date: { gte: from, lte: to }, status: 'CLOSED' },
+    where:   { orgId: req.user.orgId, date: { gte: from, lte: to }, status: 'CLOSED' },
     include: { packSales: { include: { pack: true } } },
     orderBy: [{ date: 'asc' }, { createdAt: 'asc' }],
   }))
 
-  // ── Summary ──────────────────────────────────────────────────────────────
+  // ── Summary ────────────────────────────────────────────────────────────────
   let instantSale = 0, totalUnits = 0
   let onlineSale = 0, atm = 0, onlineCash = 0, instantCash = 0, actualCOH = 0
   let reconCount = 0
@@ -82,7 +77,7 @@ router.get('/', verifyAccessToken, async (req, res) => {
       instantSale += sale.amount
       totalUnits  += sale.unitsSold
     }
-    if (s.onlineSale != null)       { onlineSale  += s.onlineSale;       reconCount++ }
+    if (s.onlineSale != null)      { onlineSale  += s.onlineSale;      reconCount++ }
     if (s.atm != null)               atm          += s.atm
     if (s.onlineCash != null)        onlineCash   += s.onlineCash
     if (s.instantCash != null)       instantCash  += s.instantCash
@@ -94,7 +89,7 @@ router.get('/', verifyAccessToken, async (req, res) => {
   const expectedCOH  = parseFloat((totalSale - atm - totalCash).toFixed(2))
   const overallTotal = reconCount > 0 ? parseFloat((actualCOH - expectedCOH).toFixed(2)) : null
 
-  // ── By day ────────────────────────────────────────────────────────────────
+  // ── By day ──────────────────────────────────────────────────────────────────
   const dayMap = {}
   for (const s of shifts) {
     if (!dayMap[s.date]) dayMap[s.date] = {
@@ -105,29 +100,27 @@ router.get('/', verifyAccessToken, async (req, res) => {
     const d = dayMap[s.date]
     const shiftInstant = s.packSales.reduce((sum, sale) => sum + sale.amount, 0)
     const shiftUnits   = s.packSales.reduce((sum, sale) => sum + sale.unitsSold, 0)
-    const shiftOnline   = s.onlineSale     ?? null
-    const shiftAtm      = s.atm            ?? null
-    const shiftOCash    = s.onlineCash     ?? null
-    const shiftICash    = s.instantCash    ?? null
-    const shiftTCash    = shiftOCash != null || shiftICash != null
+    const shiftOnline  = s.onlineSale     ?? null
+    const shiftAtm     = s.atm            ?? null
+    const shiftOCash   = s.onlineCash     ?? null
+    const shiftICash   = s.instantCash    ?? null
+    const shiftTCash   = shiftOCash != null || shiftICash != null
       ? parseFloat(((shiftOCash || 0) + (shiftICash || 0)).toFixed(2)) : null
-    const shiftTS       = parseFloat((shiftInstant + (shiftOnline || 0)).toFixed(2))
-    const shiftExpCOH   = shiftOnline != null
+    const shiftTS      = parseFloat((shiftInstant + (shiftOnline || 0)).toFixed(2))
+    const shiftExpCOH  = shiftOnline != null
       ? parseFloat((shiftTS - (shiftAtm || 0) - (shiftTCash || 0)).toFixed(2)) : null
-    const shiftActCOH   = s.actualCashOnHand != null ? parseFloat(s.actualCashOnHand.toFixed(2)) : null
+    const shiftActCOH  = s.actualCashOnHand != null ? parseFloat(s.actualCashOnHand.toFixed(2)) : null
     d.shifts.push({
-      id: s.id,
-      shiftTag: s.shiftTag,
-      units: shiftUnits,
+      id: s.id, shiftTag: s.shiftTag, units: shiftUnits,
       instantSale: parseFloat(shiftInstant.toFixed(2)),
-      onlineSale: shiftOnline != null ? parseFloat(shiftOnline.toFixed(2)) : null,
-      totalSale: shiftTS,
-      atm: shiftAtm != null ? parseFloat(shiftAtm.toFixed(2)) : null,
-      onlineCash: shiftOCash != null ? parseFloat(shiftOCash.toFixed(2)) : null,
+      onlineSale:  shiftOnline != null ? parseFloat(shiftOnline.toFixed(2)) : null,
+      totalSale:   shiftTS,
+      atm:         shiftAtm   != null ? parseFloat(shiftAtm.toFixed(2))   : null,
+      onlineCash:  shiftOCash != null ? parseFloat(shiftOCash.toFixed(2)) : null,
       instantCash: shiftICash != null ? parseFloat(shiftICash.toFixed(2)) : null,
-      totalCash: shiftTCash,
+      totalCash:   shiftTCash,
       expectedCOH: shiftExpCOH,
-      actualCOH: shiftActCOH,
+      actualCOH:   shiftActCOH,
       overallTotal: shiftActCOH != null && shiftExpCOH != null
         ? parseFloat((shiftActCOH - shiftExpCOH).toFixed(2)) : null,
     })
@@ -141,28 +134,24 @@ router.get('/', verifyAccessToken, async (req, res) => {
   }
 
   const byDay = Object.values(dayMap).map((d) => {
-    const ts   = parseFloat((d.onlineSale + d.instantSale).toFixed(2))
-    const tc   = parseFloat((d.onlineCash + d.instantCash).toFixed(2))
-    const exp  = parseFloat((ts - d.atm - tc).toFixed(2))
+    const ts      = parseFloat((d.onlineSale + d.instantSale).toFixed(2))
+    const tc      = parseFloat((d.onlineCash + d.instantCash).toFixed(2))
+    const exp     = parseFloat((ts - d.atm - tc).toFixed(2))
     const overall = d.hasRecon && d.actualCOH != null ? parseFloat((d.actualCOH - exp).toFixed(2)) : null
     return {
-      date: d.date,
-      shifts: d.shifts,
-      units: d.units,
+      date: d.date, shifts: d.shifts, units: d.units,
       instantSale: parseFloat(d.instantSale.toFixed(2)),
-      onlineSale: parseFloat(d.onlineSale.toFixed(2)),
-      totalSale: ts,
-      atm: parseFloat(d.atm.toFixed(2)),
+      onlineSale:  parseFloat(d.onlineSale.toFixed(2)),
+      totalSale: ts, atm: parseFloat(d.atm.toFixed(2)),
       onlineCash: parseFloat(d.onlineCash.toFixed(2)),
       instantCash: parseFloat(d.instantCash.toFixed(2)),
-      totalCash: tc,
-      expectedCOH: exp,
-      actualCOH: d.actualCOH != null ? parseFloat(d.actualCOH.toFixed(2)) : null,
+      totalCash: tc, expectedCOH: exp,
+      actualCOH:   d.actualCOH != null ? parseFloat(d.actualCOH.toFixed(2)) : null,
       overallTotal: overall,
     }
   })
 
-  // ── By game ───────────────────────────────────────────────────────────────
+  // ── By game ────────────────────────────────────────────────────────────────
   const gameMap = {}
   for (const s of shifts) {
     for (const sale of s.packSales) {
@@ -180,17 +169,13 @@ router.get('/', verifyAccessToken, async (req, res) => {
     from, to,
     summary: {
       instantSale: parseFloat(instantSale.toFixed(2)),
-      totalUnits,
-      onlineSale: parseFloat(onlineSale.toFixed(2)),
-      totalSale,
-      atm: parseFloat(atm.toFixed(2)),
+      totalUnits, onlineSale: parseFloat(onlineSale.toFixed(2)),
+      totalSale, atm: parseFloat(atm.toFixed(2)),
       onlineCash: parseFloat(onlineCash.toFixed(2)),
       instantCash: parseFloat(instantCash.toFixed(2)),
-      totalCash,
-      expectedCOH,
-      actualCOH: reconCount > 0 ? parseFloat(actualCOH.toFixed(2)) : null,
-      overallTotal,
-      shiftsCount: shifts.length,
+      totalCash, expectedCOH,
+      actualCOH:   reconCount > 0 ? parseFloat(actualCOH.toFixed(2)) : null,
+      overallTotal, shiftsCount: shifts.length,
     },
     byDay,
     byGame,
