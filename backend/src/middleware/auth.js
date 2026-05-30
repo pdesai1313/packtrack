@@ -23,4 +23,10 @@ function requireRole(...roles) {
   }
 }
 
-module.exports = { verifyAccessToken, requireRole }
+// Ensures the user belongs to an org — blocks SUPER_ADMIN from org-scoped routes
+function requireOrg(req, res, next) {
+  if (!req.user?.orgId) return res.status(403).json({ error: 'Organization context required' })
+  next()
+}
+
+module.exports = { verifyAccessToken, requireRole, requireOrg }
