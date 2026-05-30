@@ -1,0 +1,224 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Roles ────────────────────────────────────────────────────────────────────
+// SUPER_ADMIN  — you, crosses all orgs, no orgId
+// ADMIN        — org owner, full access within their org
+// REVIEWER     — can commit shifts
+// OPERATOR     — can scan only
+
+// ─── Org status ───────────────────────────────────────────────────────────────
+// ACTIVE       — normal access
+// SUSPENDED    — blocked by super-admin
+
+// ─── Organization (one per customer / store) ──────────────────────────────────
+model Organization {
+  id        Int      @id @default(autoincrement())
+  name      String
+  slug      String   @unique           // e.g. "joes-corner-store"
+  status    String   @default("ACTIVE")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  users      User[]
+  packs      Pack[]
+  shifts     Shift[]
+  packStates PackState[]
+  packSales  PackSale[]
+  auditLogs  AuditLog[]
+  settings   OrgSettings?
+
+  @@map("organizations")
+}
+
+// ─── User ─────────────────────────────────────────────────────────────────────
+model User {
+  id            Int      @id @default(autoincrement())
+  name          String
+  email         String   @unique
+  passwordHash  String   @map("password_hash")
+  role          String   @default("OPERATOR")
+  active        Boolean  @default(true)
+  emailVerified Boolean  @default(false) @map("email_verified")
+  orgId         Int?     @map("org_id")   // null for SUPER_ADMIN only
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  org                     Organization?            @relation(fields: [orgId], references: [id])
+  shifts                  Shift[]                  @relation("ShiftCreatedBy")
+  auditLogs               AuditLog[]               @relation("AuditLogUser")
+  emailVerificationTokens EmailVerificationToken[]
+  passwordResetTokens     PasswordResetToken[]
+
+  @@map("users")
+}
+
+// ─── Email Verification ───────────────────────────────────────────────────────
+model EmailVerificationToken {
+  id        Int      @id @default(autoincrement())
+  userId    Int      @map("user_id")
+  token     String   @unique
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("email_verification_tokens")
+}
+
+// ─── Password Reset ───────────────────────────────────────────────────────────
+model PasswordResetToken {
+  id        Int      @id @default(autoincrement())
+  userId    Int      @map("user_id")
+  token     String   @unique
+  expiresAt DateTime @map("expires_at")
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("password_reset_tokens")
+}
+
+// ─── Per-org Settings ─────────────────────────────────────────────────────────
+model OrgSettings {
+  id               Int      @id @default(autoincrement())
+  orgId            Int      @unique @map("org_id")
+  toleranceTickets Int      @default(2) @map("tolerance_tickets")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  org Organization @relation(fields: [orgId], references: [id])
+
+  @@map("org_settings")
+}
+
+// ─── Pack ─────────────────────────────────────────────────────────────────────
+model Pack {
+  id            Int      @id @default(autoincrement())
+  orgId         Int      @map("org_id")
+  packId        String   @map("pack_id")
+  packSize      Int      @map("pack_size")
+  ticketValue   Float    @map("ticket_value")
+  gameName      String?  @map("game_name")
+  scannerNumber String   @map("scanner_number")
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  org          Organization  @relation(fields: [orgId], references: [id])
+  scannerState ScannerState?
+  packStates   PackState[]
+  packSales    PackSale[]
+
+  @@unique([orgId, packId])  // same barcode can exist across different orgs
+  @@map("packs")
+}
+
+// ─── Scanner State ────────────────────────────────────────────────────────────
+model ScannerState {
+  packId              Int       @id @map("pack_id")
+  lastCommittedTicket Int       @default(0) @map("last_committed_ticket")
+  lastCommittedAt     DateTime? @map("last_committed_at")
+
+  pack Pack @relation(fields: [packId], references: [id], onDelete: Cascade)
+
+  @@map("scanner_states")
+}
+
+// ─── Shift ────────────────────────────────────────────────────────────────────
+model Shift {
+  id              Int      @id @default(autoincrement())
+  orgId           Int      @map("org_id")
+  date            String
+  shiftTag        String   @map("shift_tag")
+  isAuthoritative Boolean  @map("is_authoritative")
+  status          String   @default("OPEN")
+  createdById     Int      @map("created_by_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  onlineSale       Float? @map("online_sale")
+  atm              Float? @map("atm")
+  onlineCash       Float? @map("online_cash")
+  instantCash      Float? @map("instant_cash")
+  actualCashOnHand Float? @map("actual_cash_on_hand")
+
+  org        Organization @relation(fields: [orgId], references: [id])
+  createdBy  User         @relation("ShiftCreatedBy", fields: [createdById], references: [id])
+  packStates PackState[]
+  packSales  PackSale[]
+
+  @@index([orgId, date])
+  @@map("shifts")
+}
+
+// ─── Pack State (per shift scan) ──────────────────────────────────────────────
+model PackState {
+  id             Int      @id @default(autoincrement())
+  orgId          Int      @map("org_id")
+  packId         Int      @map("pack_id")
+  shiftId        Int      @map("shift_id")
+  startTicket    Int?     @map("start_ticket")
+  endTicket      Int?     @map("end_ticket")
+  computedUnits  Int?     @map("computed_units")
+  computedAmount Float?   @map("computed_amount")
+  rawBarcode     String?  @map("raw_barcode")
+  flags          String   @default("[]")
+  status         String   @default("OPEN")
+  overrideReason String?  @map("override_reason")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  org   Organization @relation(fields: [orgId], references: [id])
+  pack  Pack         @relation(fields: [packId], references: [id])
+  shift Shift        @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, packId, shiftId])
+  @@map("pack_states")
+}
+
+// ─── Pack Sale (committed) ────────────────────────────────────────────────────
+model PackSale {
+  id             Int      @id @default(autoincrement())
+  orgId          Int      @map("org_id")
+  packId         Int      @map("pack_id")
+  shiftId        Int      @map("shift_id")
+  startTicket    Int      @map("start_ticket")
+  endTicket      Int      @map("end_ticket")
+  unitsSold      Int      @map("units_sold")
+  amount         Float
+  flags          String   @default("[]")
+  overrideReason String?  @map("override_reason")
+  committedAt    DateTime @default(now()) @map("committed_at")
+
+  org   Organization @relation(fields: [orgId], references: [id])
+  pack  Pack         @relation(fields: [packId], references: [id])
+  shift Shift        @relation(fields: [shiftId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, packId, shiftId])
+  @@map("pack_sales")
+}
+
+// ─── Audit Log ────────────────────────────────────────────────────────────────
+model AuditLog {
+  id          Int      @id @default(autoincrement())
+  orgId       Int      @map("org_id")
+  userId      Int      @map("user_id")
+  action      String
+  entity      String
+  entityId    String   @map("entity_id")
+  description String
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  org  Organization @relation(fields: [orgId], references: [id])
+  user User         @relation("AuditLogUser", fields: [userId], references: [id])
+
+  @@index([orgId, createdAt])
+  @@map("audit_logs")
+}

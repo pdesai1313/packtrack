@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: pack-lottery-api
+    env: node
+    buildCommand: npm install && npx prisma generate && npx prisma db push
+    startCommand: node src/index.js
+    envVars:
+      - key: DATABASE_URL
+        sync: false          # you paste the Neon connection string here in Render dashboard
+      - key: JWT_SECRET
+        sync: false          # generate a random string, e.g. openssl rand -hex 32
+      - key: JWT_REFRESH_SECRET
+        sync: false          # another random string
+      - key: JWT_EXPIRY
+        value: 15m
+      - key: JWT_REFRESH_EXPIRY
+        value: 7d
+      - key: NODE_ENV
+        value: production
+      - key: CORS_ORIGIN
+        sync: false          # your Vercel frontend URL, e.g. https://pack-lottery.vercel.app
+      - key: PORT
+        value: 4000
