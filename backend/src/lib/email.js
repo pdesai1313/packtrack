@@ -1,4 +1,6 @@
 const nodemailer = require('nodemailer')
+const dns = require('dns')
+dns.setDefaultResultOrder('ipv4first') // Render free tier: force IPv4 for all DNS lookups
 
 async function sendEmail({ to, subject, html }) {
   console.log(`[EMAIL] Sending to ${to} | RESEND=${!!process.env.RESEND_API_KEY} | GMAIL=${!!process.env.EMAIL_USER}`)
