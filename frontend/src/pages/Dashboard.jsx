@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { getShifts } from '../api/shifts'
 import { getReport } from '../api/reports'
-import { getGroceryEntries } from '../api/grocery'
 import { getAuditLogs } from '../api/audit'
 
 function today() { return new Date().toISOString().split('T')[0] }
@@ -31,10 +30,9 @@ const ACTION_COLOR = {
 }
 
 const ENTITY_DOT = {
-  SHIFT:   'bg-blue-400',
-  PACK:    'bg-amber-400',
-  GROCERY: 'bg-emerald-400',
-  USER:    'bg-gray-400',
+  SHIFT: 'bg-blue-400',
+  PACK:  'bg-amber-400',
+  USER:  'bg-gray-400',
 }
 
 function KPICard({ label, value, sub, accent, onClick }) {
@@ -56,36 +54,30 @@ function KPICard({ label, value, sub, accent, onClick }) {
 
 export default function Dashboard() {
   const { user } = useAuth()
-  const navigate = useNavigate()
+  const navigate  = useNavigate()
   const t = today()
 
   const { data: shifts = [], isLoading: shiftsLoading } = useQuery({
     queryKey: ['shifts'],
-    queryFn: getShifts,
+    queryFn:  getShifts,
   })
 
   const { data: report } = useQuery({
     queryKey: ['reports', t, t],
-    queryFn: () => getReport(t, t),
-  })
-
-  const { data: grocery = [] } = useQuery({
-    queryKey: ['grocery', t, t],
-    queryFn: () => getGroceryEntries(t, t),
+    queryFn:  () => getReport(t, t),
   })
 
   const { data: auditLogs = [] } = useQuery({
     queryKey: ['audit', { limit: 10 }],
-    queryFn: () => getAuditLogs({ limit: 10 }),
-    enabled: user?.role === 'ADMIN',
+    queryFn:  () => getAuditLogs({ limit: 10 }),
+    enabled:  user?.role === 'ADMIN',
   })
 
   const openShifts  = shifts.filter((s) => s.status === 'OPEN')
   const closedToday = shifts.filter((s) => s.status === 'CLOSED' && s.date === t)
 
   const todayLottery = report?.summary?.instantSale ?? null
-  const todayGrocery = grocery.reduce((sum, e) => sum + (e.creditDebit ?? 0) + (e.ebt ?? 0) + (e.cashSales ?? 0), 0)
-  const groceryHasData = grocery.length > 0
+  const todayUnits   = report?.summary?.totalUnits  ?? null
 
   const hour = new Date().getHours()
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
@@ -98,7 +90,7 @@ export default function Dashboard() {
   return (
     <div className="max-w-6xl">
 
-      {/* ── Greeting ─────────────────────────────────────────────────────── */}
+      {/* Greeting */}
       <div className="mb-7">
         <h2 className="text-2xl font-bold text-gray-900 tracking-tight">
           {greeting}, {user?.name?.split(' ')[0]} 👋
@@ -106,7 +98,7 @@ export default function Dashboard() {
         <p className="text-gray-400 text-sm mt-0.5">{dateLabel}</p>
       </div>
 
-      {/* ── KPI row ──────────────────────────────────────────────────────── */}
+      {/* KPI row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         <KPICard
           label="Open Shifts"
@@ -116,14 +108,14 @@ export default function Dashboard() {
           onClick={() => navigate('/shifts')}
         />
         <KPICard
-          label="Today's Lottery"
+          label="Today's Sales"
           value={todayLottery != null ? fmt(todayLottery) : '—'}
-          sub={report?.summary ? `${report.summary.totalUnits} units · ${report.summary.shiftsCount} shift${report.summary.shiftsCount !== 1 ? 's' : ''}` : 'No data yet'}
+          sub={report?.summary ? `${report.summary.totalUnits} units` : 'No data yet'}
         />
         <KPICard
-          label="Today's Grocery"
-          value={groceryHasData ? fmt(todayGrocery) : '—'}
-          sub={groceryHasData ? `${grocery.length} entr${grocery.length !== 1 ? 'ies' : 'y'}` : 'No entries today'}
+          label="Units Sold Today"
+          value={todayUnits != null ? todayUnits.toLocaleString() : '—'}
+          sub={report?.summary?.shiftsCount ? `across ${report.summary.shiftsCount} shift${report.summary.shiftsCount !== 1 ? 's' : ''}` : 'No shifts committed'}
         />
         <KPICard
           label="Closed Today"
@@ -132,54 +124,42 @@ export default function Dashboard() {
         />
       </div>
 
-      {/* ── Quick actions ─────────────────────────────────────────────────── */}
-      {!['OPERATOR'].includes(user?.role) && (
+      {/* Quick actions */}
+      {user?.role !== 'OPERATOR' && (
         <div className="mb-8">
           <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Quick Actions</p>
           <div className="flex flex-wrap gap-2">
-            <button
-              className="btn-primary btn-sm"
-              onClick={() => navigate('/shifts')}
-            >
+            <button className="btn-primary btn-sm" onClick={() => navigate('/shifts')}>
               + New Shift
             </button>
-            <button
-              className="btn-secondary btn-sm"
-              onClick={() => navigate('/grocery')}
-            >
-              + Grocery Entry
-            </button>
             {canViewReports && (
-              <button
-                className="btn-secondary btn-sm"
-                onClick={() => navigate('/reports')}
-              >
+              <button className="btn-secondary btn-sm" onClick={() => navigate('/reports')}>
                 View Reports →
+              </button>
+            )}
+            {canViewReports && (
+              <button className="btn-secondary btn-sm" onClick={() => navigate('/daily')}>
+                Daily Summary →
               </button>
             )}
           </div>
         </div>
       )}
 
-      {/* ── Two-column bottom ─────────────────────────────────────────────── */}
+      {/* Two-column bottom */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
 
         {/* Open shifts */}
         <div className="card p-0">
           <div className="px-5 py-3.5 border-b border-gray-100 flex items-center justify-between">
             <p className="text-sm font-semibold">Open Shifts</p>
-            <button
-              className="text-xs text-blue-600 hover:underline"
-              onClick={() => navigate('/shifts')}
-            >
+            <button className="text-xs text-blue-600 hover:underline" onClick={() => navigate('/shifts')}>
               All shifts →
             </button>
           </div>
           <div className="divide-y divide-gray-50">
             {openShifts.length === 0 && (
-              <p className="px-5 py-6 text-sm text-gray-400 text-center">
-                No open shifts right now.
-              </p>
+              <p className="px-5 py-6 text-sm text-gray-400 text-center">No open shifts right now.</p>
             )}
             {openShifts.slice(0, 5).map((s) => (
               <div key={s.id} className="px-5 py-3 flex items-center justify-between">
@@ -187,10 +167,7 @@ export default function Dashboard() {
                   <p className="text-sm font-semibold text-gray-800">{s.shiftTag}</p>
                   <p className="text-xs text-gray-400">{s.date} · {s._count?.packStates ?? 0} packs</p>
                 </div>
-                <button
-                  className="btn-primary btn-sm"
-                  onClick={() => navigate(`/shifts/${s.id}/scan`)}
-                >
+                <button className="btn-primary btn-sm" onClick={() => navigate(`/shifts/${s.id}/scan`)}>
                   Scan →
                 </button>
               </div>
@@ -198,15 +175,12 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Recent activity (ADMIN) or Today's grocery summary */}
+        {/* Recent activity (ADMIN) or closed shifts today */}
         {user?.role === 'ADMIN' ? (
           <div className="card p-0">
             <div className="px-5 py-3.5 border-b border-gray-100 flex items-center justify-between">
               <p className="text-sm font-semibold">Recent Activity</p>
-              <button
-                className="text-xs text-blue-600 hover:underline"
-                onClick={() => navigate('/audit')}
-              >
+              <button className="text-xs text-blue-600 hover:underline" onClick={() => navigate('/audit')}>
                 Full audit →
               </button>
             </div>
@@ -219,9 +193,7 @@ export default function Dashboard() {
                   <span className={`mt-1.5 w-2 h-2 rounded-full flex-shrink-0 ${ENTITY_DOT[log.entity] || 'bg-gray-300'}`} />
                   <div className="min-w-0 flex-1">
                     <p className="text-xs text-gray-700 truncate">{log.description}</p>
-                    <p className="text-xs text-gray-400 mt-0.5">
-                      {log.user?.name} · {timeAgo(log.createdAt)}
-                    </p>
+                    <p className="text-xs text-gray-400 mt-0.5">{log.user?.name} · {timeAgo(log.createdAt)}</p>
                   </div>
                   <span className={`flex-shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${ACTION_COLOR[log.action] || 'bg-gray-100 text-gray-600'}`}>
                     {log.action}
@@ -233,31 +205,23 @@ export default function Dashboard() {
         ) : (
           <div className="card p-0">
             <div className="px-5 py-3.5 border-b border-gray-100">
-              <p className="text-sm font-semibold">Today's Grocery Entries</p>
+              <p className="text-sm font-semibold">Closed Shifts Today</p>
             </div>
             <div className="divide-y divide-gray-50">
-              {grocery.length === 0 && (
-                <p className="px-5 py-6 text-sm text-gray-400 text-center">No grocery entries today.</p>
+              {closedToday.length === 0 && (
+                <p className="px-5 py-6 text-sm text-gray-400 text-center">No shifts committed today yet.</p>
               )}
-              {grocery.map((e) => {
-                const total = e.creditDebit + e.ebt + e.cashSales
-                const exp = e.openingCash + e.cashSales
-                const diff = e.actualCashOnHand - exp
-                return (
-                  <div key={e.id} className="px-5 py-3 flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-semibold">{e.storeName || 'Entry'}</p>
-                      <p className="text-xs text-gray-400">{e.preparedBy?.name}</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-sm font-bold">{fmt(total)}</p>
-                      <p className={`text-xs font-semibold ${diff >= 0 ? 'text-green-600' : 'text-red-500'}`}>
-                        {diff >= 0 ? '+' : ''}{fmt(diff)}
-                      </p>
-                    </div>
+              {closedToday.map((s) => (
+                <div key={s.id} className="px-5 py-3 flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-gray-800">{s.shiftTag}</p>
+                    <p className="text-xs text-gray-400">{fmt(s.totalAmount)} · {s.totalUnits} units</p>
                   </div>
-                )
-              })}
+                  <button className="btn-secondary btn-sm" onClick={() => navigate(`/shifts/${s.id}/commit`)}>
+                    View →
+                  </button>
+                </div>
+              ))}
             </div>
           </div>
         )}
