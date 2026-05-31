@@ -1,60 +1,35 @@
-const nodemailer = require('nodemailer')
-const dns = require('dns')
-dns.setDefaultResultOrder('ipv4first') // Render free tier: force IPv4 for all DNS lookups
-
 async function sendEmail({ to, subject, html }) {
-  console.log(`[EMAIL] Sending to ${to} | RESEND=${!!process.env.RESEND_API_KEY} | GMAIL=${!!process.env.EMAIL_USER}`)
-
-  // Resend (preferred)
-  if (process.env.RESEND_API_KEY) {
-    const res = await fetch('https://api.resend.com/emails', {
+  // Brevo — HTTP API, works on Render free tier (no SMTP needed)
+  if (process.env.BREVO_API_KEY) {
+    const res = await fetch('https://api.brevo.com/v3/smtp/email', {
       method:  'POST',
       headers: {
-        Authorization:  `Bearer ${process.env.RESEND_API_KEY}`,
+        'api-key':      process.env.BREVO_API_KEY,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        from: process.env.EMAIL_FROM || 'onboarding@resend.dev',
-        to,
+        sender:      { name: 'PackTrack', email: process.env.EMAIL_USER || 'pranaydesai1286@gmail.com' },
+        to:          [{ email: to }],
         subject,
-        html,
+        htmlContent: html,
       }),
     })
     if (!res.ok) {
       const body = await res.text()
-      throw new Error(`Resend failed (${res.status}): ${body}`)
+      throw new Error(`Brevo failed (${res.status}): ${body}`)
     }
+    console.log(`[EMAIL] Sent via Brevo to ${to}`)
     return
   }
 
-  // Gmail fallback
-  if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
-    console.log(`[EMAIL] Using Gmail: ${process.env.EMAIL_USER}`)
-    const transporter = nodemailer.createTransport({
-      host: 'smtp.gmail.com',
-      port: 587,
-      secure: false,
-      family: 4, // Force IPv4 — Render free tier doesn't support IPv6 outbound
-      auth: { user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS },
-    })
-    const info = await transporter.sendMail({
-      from: `PackTrack <${process.env.EMAIL_USER}>`,
-      to,
-      subject,
-      html,
-    })
-    console.log(`[EMAIL] Gmail sent: ${info.messageId}`)
-    return
-  }
-
-  // Dev fallback — log to console
-  const text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
-  const urlMatch = text.match(/https?:\/\/\S+verify-email\S+/)
+  // Dev fallback — log link to console
+  const text     = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+  const urlMatch = text.match(/https?:\/\/\S+(?:verify-email|reset-password)\S*/)
   console.log(`\n📧 [DEV EMAIL]`)
   console.log(`   To:      ${to}`)
   console.log(`   Subject: ${subject}`)
   if (urlMatch) console.log(`   Link:    ${urlMatch[0]}`)
-  else console.log(`   Body:    ${text}`)
+  else          console.log(`   Body:    ${text}`)
   console.log()
 }
 
