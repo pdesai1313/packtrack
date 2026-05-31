@@ -47,6 +47,7 @@ async function uniqueSlug(base) {
 }
 
 // ── POST /api/auth/signup ─────────────────────────────────────────────────────
+// Nothing is written to users/orgs until email is verified.
 router.post('/signup', async (req, res) => {
   const { orgName, name, email, password } = req.body || {}
 
@@ -56,21 +57,20 @@ router.post('/signup', async (req, res) => {
     return res.status(400).json({ error: 'Password must be at least 8 characters' })
 
   const normalizedEmail = email.toLowerCase().trim()
-  const existing = await prisma.user.findUnique({ where: { email: normalizedEmail } })
-  if (existing) return res.status(409).json({ error: 'Email already registered' })
 
-  const slug         = await uniqueSlug(orgName)
+  // Block if already a verified user
+  const existingUser = await prisma.user.findUnique({ where: { email: normalizedEmail } })
+  if (existingUser) return res.status(409).json({ error: 'Email already registered' })
+
+  // Replace any previous pending signup for this email
+  await prisma.pendingSignup.deleteMany({ where: { email: normalizedEmail } })
+
   const passwordHash = await bcrypt.hash(password, 10)
   const token        = makeToken()
   const expiresAt    = hoursFromNow(24)
 
-  await prisma.$transaction(async (tx) => {
-    const org = await tx.organization.create({ data: { name: orgName.trim(), slug } })
-    await tx.orgSettings.create({ data: { orgId: org.id } })
-    const user = await tx.user.create({
-      data: { name: name.trim(), email: normalizedEmail, passwordHash, role: 'ADMIN', orgId: org.id, emailVerified: false },
-    })
-    await tx.emailVerificationToken.create({ data: { userId: user.id, token, expiresAt } })
+  await prisma.pendingSignup.create({
+    data: { token, orgName: orgName.trim(), name: name.trim(), email: normalizedEmail, passwordHash, expiresAt },
   })
 
   const verifyUrl = `${process.env.APP_URL}/verify-email?token=${token}`
@@ -90,28 +90,49 @@ router.post('/signup', async (req, res) => {
     `,
   })
 
-  res.status(201).json({ message: 'Account created. Check your email to verify your address.' })
+  res.status(201).json({ message: 'Check your email to verify your address.' })
 })
 
 // ── POST /api/auth/verify-email ───────────────────────────────────────────────
+// Reads the pending signup, creates org + user, then deletes the pending record.
 router.post('/verify-email', async (req, res) => {
   const { token } = req.body || {}
   if (!token) return res.status(400).json({ error: 'Token required' })
 
-  const record = await prisma.emailVerificationToken.findUnique({ where: { token }, include: { user: true } })
-  if (!record) return res.status(400).json({ error: 'Invalid or expired link' })
+  const pending = await prisma.pendingSignup.findUnique({ where: { token } })
+  if (!pending) return res.status(400).json({ error: 'Invalid or expired link' })
 
-  if (record.expiresAt < new Date()) {
-    await prisma.emailVerificationToken.delete({ where: { token } })
-    return res.status(400).json({ error: 'Verification link expired. Request a new one.', code: 'TOKEN_EXPIRED' })
+  if (pending.expiresAt < new Date()) {
+    await prisma.pendingSignup.delete({ where: { token } })
+    return res.status(400).json({ error: 'Verification link expired. Sign up again.', code: 'TOKEN_EXPIRED' })
   }
 
-  await prisma.$transaction([
-    prisma.user.update({ where: { id: record.userId }, data: { emailVerified: true } }),
-    prisma.emailVerificationToken.delete({ where: { token } }),
-  ])
+  // Double-check email not taken (race condition guard)
+  const taken = await prisma.user.findUnique({ where: { email: pending.email } })
+  if (taken) {
+    await prisma.pendingSignup.delete({ where: { token } })
+    return res.status(409).json({ error: 'Email already registered' })
+  }
 
-  const user = await prisma.user.findUnique({ where: { id: record.userId } })
+  const slug = await uniqueSlug(pending.orgName)
+
+  const user = await prisma.$transaction(async (tx) => {
+    const org = await tx.organization.create({ data: { name: pending.orgName, slug } })
+    await tx.orgSettings.create({ data: { orgId: org.id } })
+    const newUser = await tx.user.create({
+      data: {
+        name:          pending.name,
+        email:         pending.email,
+        passwordHash:  pending.passwordHash,
+        role:          'ADMIN',
+        orgId:         org.id,
+        emailVerified: true,
+      },
+    })
+    await tx.pendingSignup.delete({ where: { token } })
+    return newUser
+  })
+
   const { accessToken, refreshToken } = issueTokens(user)
   res.json({
     user: { id: user.id, name: user.name, email: user.email, role: user.role, orgId: user.orgId },
@@ -125,22 +146,23 @@ router.post('/resend-verification', async (req, res) => {
   const { email } = req.body || {}
   if (!email) return res.status(400).json({ error: 'Email required' })
 
-  const user = await prisma.user.findUnique({ where: { email: email.toLowerCase().trim() } })
-  if (!user) return res.json({ message: 'If that email exists, a verification link was sent' })
-  if (user.emailVerified) return res.status(400).json({ error: 'Email is already verified' })
+  const normalizedEmail = email.toLowerCase().trim()
+  const SAFE = { message: 'If that email exists, a new verification link was sent' }
 
-  await prisma.emailVerificationToken.deleteMany({ where: { userId: user.id } })
+  const pending = await prisma.pendingSignup.findUnique({ where: { email: normalizedEmail } })
+  if (!pending) return res.json(SAFE)
+
   const token     = makeToken()
   const expiresAt = hoursFromNow(24)
-  await prisma.emailVerificationToken.create({ data: { userId: user.id, token, expiresAt } })
+  await prisma.pendingSignup.update({ where: { email: normalizedEmail }, data: { token, expiresAt } })
 
   const verifyUrl = `${process.env.APP_URL}/verify-email?token=${token}`
   await sendEmail({
-    to:      user.email,
+    to:      normalizedEmail,
     subject: 'Verify your PackTrack account',
     html: `
       <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px">
-        <p>Hi ${user.name},</p>
+        <p>Hi ${pending.name},</p>
         <p>Click below to verify your email address.</p>
         <a href="${verifyUrl}" style="display:inline-block;margin:16px 0;padding:12px 24px;background:#2563eb;color:#fff;border-radius:6px;text-decoration:none;font-weight:600">
           Verify Email
@@ -150,7 +172,7 @@ router.post('/resend-verification', async (req, res) => {
     `,
   })
 
-  res.json({ message: 'Verification email sent' })
+  res.json(SAFE)
 })
 
 // ── POST /api/auth/login ──────────────────────────────────────────────────────

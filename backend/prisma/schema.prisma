@@ -18,6 +18,20 @@ datasource db {
 // ACTIVE       — normal access
 // SUSPENDED    — blocked by super-admin
 
+// ─── Pending Signup (holds unverified registration until email confirmed) ────────
+model PendingSignup {
+  id           Int      @id @default(autoincrement())
+  token        String   @unique
+  orgName      String   @map("org_name")
+  name         String
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  expiresAt    DateTime @map("expires_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@map("pending_signups")
+}
+
 // ─── Organization (one per customer / store) ──────────────────────────────────
 model Organization {
   id        Int      @id @default(autoincrement())
