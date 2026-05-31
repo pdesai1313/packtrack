@@ -7,9 +7,11 @@ services:
     startCommand: node src/index.js
     envVars:
       - key: DATABASE_URL
-        sync: false          # paste your Supabase connection string (Transaction mode, port 6543)
+        sync: false   # Transaction pooler URL from Supabase Connect → ORMs → Prisma
+      - key: DIRECT_URL
+        sync: false   # Session pooler URL from Supabase Connect → ORMs → Prisma
       - key: JWT_SECRET
-        generateValue: true  # Render auto-generates a secure random value
+        generateValue: true
       - key: JWT_REFRESH_SECRET
         generateValue: true
       - key: JWT_EXPIRY
@@ -19,11 +21,11 @@ services:
       - key: NODE_ENV
         value: production
       - key: CORS_ORIGIN
-        sync: false          # your Vercel URL e.g. https://packtrack.vercel.app
+        sync: false   # your Vercel URL e.g. https://packtrack.vercel.app
       - key: APP_URL
-        sync: false          # same as CORS_ORIGIN
+        sync: false   # same as CORS_ORIGIN
       - key: RESEND_API_KEY
-        sync: false          # optional — leave blank to log emails to console
+        sync: false   # optional — leave blank to log emails to console
       - key: EMAIL_FROM
         value: PackTrack <noreply@packtrack.app>
       - key: PORT
