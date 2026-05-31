@@ -74,21 +74,21 @@ router.post('/signup', async (req, res) => {
   })
 
   const verifyUrl = `${process.env.APP_URL}/verify-email?token=${token}`
-  await sendEmail({
-    to:      normalizedEmail,
-    subject: 'Verify your PackTrack account',
-    html: `
-      <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px">
-        <h2 style="margin-bottom:8px">Welcome to PackTrack!</h2>
-        <p>Hi ${name.trim()}, please verify your email address to activate your account.</p>
-        <a href="${verifyUrl}" style="display:inline-block;margin:16px 0;padding:12px 24px;background:#2563eb;color:#fff;border-radius:6px;text-decoration:none;font-weight:600">
-          Verify Email
-        </a>
-        <p style="color:#6b7280;font-size:13px">Or paste this link in your browser:<br>${verifyUrl}</p>
-        <p style="color:#6b7280;font-size:13px">This link expires in 24 hours.</p>
-      </div>
-    `,
-  })
+  const emailHtml = `
+    <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:24px">
+      <h2 style="margin-bottom:8px">Welcome to PackTrack!</h2>
+      <p>Hi ${name.trim()}, please verify your email address to activate your account.</p>
+      <a href="${verifyUrl}" style="display:inline-block;margin:16px 0;padding:12px 24px;background:#2563eb;color:#fff;border-radius:6px;text-decoration:none;font-weight:600">
+        Verify Email
+      </a>
+      <p style="color:#6b7280;font-size:13px">Or paste this link in your browser:<br>${verifyUrl}</p>
+      <p style="color:#6b7280;font-size:13px">This link expires in 24 hours.</p>
+    </div>
+  `
+
+  // Send email in background — don't block the response
+  sendEmail({ to: normalizedEmail, subject: 'Verify your PackTrack account', html: emailHtml })
+    .catch((e) => console.error('Signup email failed:', e.message))
 
   res.status(201).json({ message: 'Check your email to verify your address.' })
 })
@@ -157,7 +157,7 @@ router.post('/resend-verification', async (req, res) => {
   await prisma.pendingSignup.update({ where: { email: normalizedEmail }, data: { token, expiresAt } })
 
   const verifyUrl = `${process.env.APP_URL}/verify-email?token=${token}`
-  await sendEmail({
+  sendEmail({
     to:      normalizedEmail,
     subject: 'Verify your PackTrack account',
     html: `
@@ -170,7 +170,7 @@ router.post('/resend-verification', async (req, res) => {
         <p style="color:#6b7280;font-size:13px">This link expires in 24 hours.</p>
       </div>
     `,
-  })
+  }).catch((e) => console.error('Resend verification email failed:', e.message))
 
   res.json(SAFE)
 })
@@ -229,7 +229,7 @@ router.post('/forgot-password', async (req, res) => {
   await prisma.passwordResetToken.create({ data: { userId: user.id, token, expiresAt } })
 
   const resetUrl = `${process.env.APP_URL}/reset-password?token=${token}`
-  await sendEmail({
+  sendEmail({
     to:      user.email,
     subject: 'Reset your PackTrack password',
     html: `
@@ -243,7 +243,7 @@ router.post('/forgot-password', async (req, res) => {
         <p style="color:#6b7280;font-size:13px">This link expires in 1 hour. If you didn't request this, you can safely ignore this email.</p>
       </div>
     `,
-  })
+  }).catch((e) => console.error('Reset email failed:', e.message))
 
   res.json(SAFE)
 })
