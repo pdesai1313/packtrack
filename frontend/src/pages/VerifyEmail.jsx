@@ -1,13 +1,12 @@
 import { useEffect, useState } from 'react'
-import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { verifyEmail } from '../api/auth'
 
 export default function VerifyEmail() {
-  const [searchParams]    = useSearchParams()
+  const [searchParams]      = useSearchParams()
   const { loginFromTokens } = useAuth()
-  const navigate          = useNavigate()
-  const [status, setStatus] = useState('loading') // loading | success | error
+  const [status, setStatus] = useState('loading')
   const [errorMsg, setErrorMsg] = useState('')
 
   useEffect(() => {
@@ -18,7 +17,8 @@ export default function VerifyEmail() {
       .then((data) => {
         loginFromTokens(data)
         setStatus('success')
-        setTimeout(() => navigate('/shifts'), 2000)
+        // Use full redirect so AuthContext re-initializes cleanly with stored tokens
+        setTimeout(() => { window.location.href = '/shifts' }, 2000)
       })
       .catch((err) => {
         setStatus('error')
@@ -41,7 +41,10 @@ export default function VerifyEmail() {
           <>
             <div className="text-4xl mb-4">✅</div>
             <h2 className="text-lg font-bold text-gray-900 mb-2">Email verified!</h2>
-            <p className="text-gray-500 text-sm">Redirecting you to the app…</p>
+            <p className="text-gray-500 text-sm mb-4">Taking you to the app…</p>
+            <a href="/shifts" className="btn-primary inline-block text-sm">
+              Enter app →
+            </a>
           </>
         )}
 
