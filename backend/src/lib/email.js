@@ -3,7 +3,10 @@ async function sendEmail({ to, subject, html }) {
     console.log(`\n📧 [DEV EMAIL]`)
     console.log(`   To:      ${to}`)
     console.log(`   Subject: ${subject}`)
-    console.log(`   Body:    ${html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200)}`)
+    const text = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+    const urlMatch = text.match(/https?:\/\/\S+verify-email\S+/)
+    if (urlMatch) console.log(`   Link:    ${urlMatch[0]}`)
+    else console.log(`   Body:    ${text}`)
     console.log()
     return
   }
