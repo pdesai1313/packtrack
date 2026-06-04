@@ -28,10 +28,12 @@ export function AuthProvider({ children }) {
     return data.user
   }
 
-  async function logout() {
-    await apiLogout().catch(() => {})
+  function logout() {
+    // Clear local session immediately — don't wait for server
     clearTokens()
     setUser(null)
+    // Fire-and-forget server call (server doesn't track sessions anyway)
+    apiLogout().catch(() => {})
   }
 
   return (

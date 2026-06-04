@@ -24,8 +24,8 @@ export default function Layout({ children }) {
   const navigate  = useNavigate()
   const location  = useLocation()
 
-  async function handleLogout() {
-    await logout()
+  function handleLogout() {
+    logout()
     navigate('/login')
   }
 
