@@ -3,7 +3,7 @@ const { z } = require('zod')
 const { PrismaClient } = require('@prisma/client')
 const { stringify } = require('csv-stringify/sync')
 const { verifyAccessToken, requireRole, requireOrg } = require('../middleware/auth')
-const { computeDelta, resolveStartTicket, getEffectiveStartTicket, parseFlags, serializeFlags, isErrorFlag } = require('../lib/delta')
+const { computeDelta, resolveStartTicket, getEffectiveStartTicket, parseFlags, serializeFlags, isErrorFlag, unitsBetween } = require('../lib/delta')
 const { audit } = require('../lib/audit')
 
 const router = express.Router()
@@ -121,7 +121,8 @@ router.post('/', verifyAccessToken, requireOrg, requireRole(['ADMIN', 'REVIEWER'
     for (const pack of packs) {
       const startTicket = await resolveStartTicket({
         startSource, manualShiftId: manualShiftId ?? null,
-        packId: pack.id, packSize: pack.packSize, date, orgId, prisma: tx,
+        packId: pack.id, packSize: pack.packSize, ticketOrder: pack.ticketOrder,
+        date, orgId, prisma: tx,
       })
       await tx.packState.create({
         data: { orgId, packId: pack.id, shiftId: created.id, startTicket: startTicket ?? null },
@@ -164,7 +165,8 @@ router.get('/:id/packstates', verifyAccessToken, requireOrg, async (req, res) =>
       for (const pack of missing) {
         const startTicket = await resolveStartTicket({
           startSource: 'previous_day', manualShiftId: null,
-          packId: pack.id, packSize: pack.packSize, date: shift.date, orgId, prisma,
+          packId: pack.id, packSize: pack.packSize, ticketOrder: pack.ticketOrder,
+          date: shift.date, orgId, prisma,
         })
         await prisma.packState.create({
           data: { orgId, packId: pack.id, shiftId: shift.id, startTicket: startTicket ?? null },
@@ -211,6 +213,7 @@ router.post('/:id/packs/:packId/scan', verifyAccessToken, requireOrg, async (req
     ticketValue:      pack.ticketValue,
     toleranceTickets: settings.toleranceTickets,
     existingEndTickets: otherStates.map((s) => s.endTicket),
+    ticketOrder:      pack.ticketOrder,
   })
 
   const updated = await prisma.packState.update({
@@ -247,6 +250,7 @@ router.put('/:id/packs/:packId/start', verifyAccessToken, requireOrg, requireRol
       ticketValue:      pack.ticketValue,
       toleranceTickets: settings.toleranceTickets,
       existingEndTickets: [],
+      ticketOrder:      pack.ticketOrder,
     })
     updateData = { ...updateData, computedUnits, computedAmount, flags: serializeFlags(flags) }
   }
@@ -338,9 +342,7 @@ router.post('/:id/commit', verifyAccessToken, requireOrg, requireRole(['ADMIN', 
       let correctUnits  = ps.computedUnits  ?? 0
       let correctAmount = ps.computedAmount ?? 0
       if (effectiveStart != null && ps.endTicket != null) {
-        const rawUnits = ps.endTicket > effectiveStart
-          ? effectiveStart + ps.pack.packSize - ps.endTicket
-          : effectiveStart - ps.endTicket
+        const rawUnits = unitsBetween(effectiveStart, ps.endTicket, ps.pack.packSize, ps.pack.ticketOrder)
         if (rawUnits >= 0) {
           correctUnits  = rawUnits
           correctAmount = parseFloat((rawUnits * ps.pack.ticketValue).toFixed(2))

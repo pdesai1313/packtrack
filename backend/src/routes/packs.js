@@ -13,12 +13,16 @@ const packSchema = z.object({
   ticketValue:   z.number().positive(),
   gameName:      z.string().optional().nullable(),
   scannerNumber: z.string().min(1),
+  ticketOrder:   z.enum(['DESCENDING', 'ASCENDING']).optional(),
 })
 
 router.get('/', verifyAccessToken, requireOrg, async (req, res) => {
   const packs = await prisma.pack.findMany({
     where:   { orgId: req.user.orgId },
-    include: { scannerState: true },
+    include: {
+      scannerState: true,
+      _count:       { select: { packSales: true } },  // for ticketOrder lock state in UI
+    },
     orderBy: { packId: 'asc' },
   })
   res.json(packs)
@@ -34,8 +38,15 @@ router.post('/', verifyAccessToken, requireOrg, requireRole('ADMIN'), async (req
   })
   if (existing) return res.status(409).json({ error: 'Pack ID already exists' })
 
+  // Default ticketOrder from org settings if not specified
+  let ticketOrder = result.data.ticketOrder
+  if (!ticketOrder) {
+    const settings = await prisma.orgSettings.findUnique({ where: { orgId } })
+    ticketOrder = settings?.ticketOrder || 'DESCENDING'
+  }
+
   const pack = await prisma.$transaction(async (tx) => {
-    const created = await tx.pack.create({ data: { ...result.data, orgId } })
+    const created = await tx.pack.create({ data: { ...result.data, ticketOrder, orgId } })
     await tx.scannerState.create({ data: { packId: created.id, lastCommittedTicket: 0 } })
     return created
   })
@@ -55,9 +66,18 @@ router.put('/:id', verifyAccessToken, requireOrg, requireRole('ADMIN'), async (r
   const result = schema.safeParse(req.body)
   if (!result.success) return res.status(400).json({ error: result.error.flatten() })
 
+  // Lock ticketOrder once any PackSale exists for this pack
+  if (result.data.ticketOrder && result.data.ticketOrder !== existing.ticketOrder) {
+    const saleCount = await prisma.packSale.count({ where: { packId: id } })
+    if (saleCount > 0) {
+      return res.status(409).json({ error: 'Cannot change ticket order — pack has committed sales' })
+    }
+  }
+
   const pack = await prisma.$transaction(async (tx) => {
     const updated = await tx.pack.update({ where: { id }, data: result.data })
 
+    // Deactivating: remove from open shifts; if ticketOrder changed, clear start tickets
     if (result.data.active === false) {
       const openShifts = await tx.shift.findMany({
         where:  { orgId: req.user.orgId, status: 'OPEN' },
@@ -66,6 +86,21 @@ router.put('/:id', verifyAccessToken, requireOrg, requireRole('ADMIN'), async (r
       if (openShifts.length > 0) {
         await tx.packState.deleteMany({
           where: { packId: id, shiftId: { in: openShifts.map((s) => s.id) } },
+        })
+      }
+    }
+
+    // If ticketOrder changed on an unused pack, clear any pre-set start tickets in OPEN shifts
+    // so they get recomputed correctly with the new direction.
+    if (result.data.ticketOrder && result.data.ticketOrder !== existing.ticketOrder) {
+      const openShifts = await tx.shift.findMany({
+        where:  { orgId: req.user.orgId, status: 'OPEN' },
+        select: { id: true },
+      })
+      if (openShifts.length > 0) {
+        await tx.packState.updateMany({
+          where: { packId: id, shiftId: { in: openShifts.map((s) => s.id) } },
+          data:  { startTicket: null, endTicket: null, computedUnits: null, computedAmount: null, flags: '[]', rawBarcode: null },
         })
       }
     }

@@ -1,11 +1,17 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getPacks, createPack, updatePack, deletePack } from '../api/packs'
+import { getSettings } from '../api/settings'
 import StatusPill from '../components/StatusPill'
 
-function PackForm({ initial, onSave, onCancel, loading, error }) {
-  const [form, setForm] = useState(initial || { packId: '', packSize: '', ticketValue: '', gameName: '', scannerNumber: '' })
+function PackForm({ initial, onSave, onCancel, loading, error, orgDefault }) {
+  const [form, setForm] = useState(initial
+    ? { ...initial, ticketOrder: initial.ticketOrder || orgDefault || 'DESCENDING' }
+    : { packId: '', packSize: '', ticketValue: '', gameName: '', scannerNumber: '', ticketOrder: orgDefault || 'DESCENDING' }
+  )
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }))
+
+  const orderLocked = !!initial && (initial._count?.packSales || 0) > 0
 
   function handleSubmit(e) {
     e.preventDefault()
@@ -35,6 +41,40 @@ function PackForm({ initial, onSave, onCancel, loading, error }) {
           <label className="label">Game Name</label>
           <input className="input" value={form.gameName} onChange={set('gameName')} placeholder="Lucky7" />
         </div>
+        <div className="col-span-2">
+          <label className="label flex items-center gap-2">
+            Ticket Order
+            {orderLocked && <span className="text-amber-600 text-[10px]">🔒 Locked — has committed sales</span>}
+          </label>
+          <div className="flex gap-2">
+            <label className={`flex-1 flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-colors ${
+              form.ticketOrder === 'DESCENDING' ? 'border-blue-400 bg-blue-50' : 'border-gray-200 hover:bg-gray-50'
+            } ${orderLocked ? 'opacity-60 cursor-not-allowed' : ''}`}>
+              <input
+                type="radio"
+                name="ticketOrder"
+                value="DESCENDING"
+                checked={form.ticketOrder === 'DESCENDING'}
+                onChange={set('ticketOrder')}
+                disabled={orderLocked}
+              />
+              <span className="text-xs">Descending ({form.packSize ? form.packSize - 1 : '99'} → 0)</span>
+            </label>
+            <label className={`flex-1 flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-colors ${
+              form.ticketOrder === 'ASCENDING' ? 'border-blue-400 bg-blue-50' : 'border-gray-200 hover:bg-gray-50'
+            } ${orderLocked ? 'opacity-60 cursor-not-allowed' : ''}`}>
+              <input
+                type="radio"
+                name="ticketOrder"
+                value="ASCENDING"
+                checked={form.ticketOrder === 'ASCENDING'}
+                onChange={set('ticketOrder')}
+                disabled={orderLocked}
+              />
+              <span className="text-xs">Ascending (0 → {form.packSize ? form.packSize - 1 : '99'})</span>
+            </label>
+          </div>
+        </div>
       </div>
       {error && <p className="text-red-600 text-xs">{error}</p>}
       <div className="flex gap-2">
@@ -47,7 +87,7 @@ function PackForm({ initial, onSave, onCancel, loading, error }) {
   )
 }
 
-function PackModal({ title, initial, onSave, onClose, loading, error }) {
+function PackModal({ title, initial, onSave, onClose, loading, error, orgDefault }) {
   useEffect(() => {
     function onKey(e) { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', onKey)
@@ -62,7 +102,7 @@ function PackModal({ title, initial, onSave, onClose, loading, error }) {
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-lg leading-none">✕</button>
         </div>
         <div className="p-5">
-          <PackForm initial={initial} onSave={onSave} onCancel={onClose} loading={loading} error={error} />
+          <PackForm initial={initial} onSave={onSave} onCancel={onClose} loading={loading} error={error} orgDefault={orgDefault} />
         </div>
       </div>
     </div>
@@ -101,6 +141,8 @@ export default function PackManagement() {
   const [formError, setFormError] = useState('')
 
   const { data: packs = [], isLoading } = useQuery({ queryKey: ['packs'], queryFn: getPacks })
+  const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: getSettings })
+  const orgDefault = settings?.ticketOrder || 'DESCENDING'
 
   const createMutation = useMutation({
     mutationFn: createPack,
@@ -137,6 +179,7 @@ export default function PackManagement() {
         <PackModal
           title={modal === 'create' ? 'Add Pack' : `Edit ${modal.packId}`}
           initial={modal === 'create' ? null : modal}
+          orgDefault={orgDefault}
           onSave={(data) =>
             modal === 'create'
               ? createMutation.mutate(data)
@@ -164,7 +207,7 @@ export default function PackManagement() {
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b border-gray-100">
               <tr>
-                {['Pack ID', 'Game', 'Scanner', 'Size', 'Value', 'Last Ticket', 'Status', ''].map((h) => (
+                {['Pack ID', 'Game', 'Scanner', 'Size', 'Value', 'Order', 'Last Ticket', 'Status', ''].map((h) => (
                   <th key={h} className="text-left px-4 py-2 text-xs font-medium text-gray-500">{h}</th>
                 ))}
               </tr>
@@ -177,6 +220,13 @@ export default function PackManagement() {
                   <td className="px-4 py-2 font-mono text-xs">{p.scannerNumber}</td>
                   <td className="px-4 py-2">{p.packSize}</td>
                   <td className="px-4 py-2">${p.ticketValue.toFixed(2)}</td>
+                  <td className="px-4 py-2">
+                    <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
+                      p.ticketOrder === 'ASCENDING' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-700'
+                    }`}>
+                      {p.ticketOrder === 'ASCENDING' ? `0→${p.packSize - 1}` : `${p.packSize - 1}→0`}
+                    </span>
+                  </td>
                   <td className="px-4 py-2 font-mono">{p.scannerState?.lastCommittedTicket ?? 0}</td>
                   <td className="px-4 py-2">
                     <StatusPill status={p.active ? 'ACTIVE' : 'INACTIVE'} />

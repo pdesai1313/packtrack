@@ -50,6 +50,71 @@ function SettingsPanel() {
   )
 }
 
+function TicketOrderPanel() {
+  const qc = useQueryClient()
+  const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: getSettings })
+  const [order, setOrder] = useState('DESCENDING')
+  const [saved, setSaved] = useState(false)
+
+  useEffect(() => { if (settings?.ticketOrder) setOrder(settings.ticketOrder) }, [settings?.ticketOrder])
+
+  const mutation = useMutation({
+    mutationFn: (value) => updateSettings({ ticketOrder: value }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['settings'] })
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
+    },
+  })
+
+  function selectOrder(value) {
+    if (value === order) return
+    setOrder(value)
+    mutation.mutate(value)
+  }
+
+  return (
+    <div className="card mb-6">
+      <h3 className="font-medium mb-1">Ticket Numbering</h3>
+      <p className="text-gray-500 text-xs mb-3">
+        How tickets count in a fresh pack. This becomes the default for new packs.
+        Each pack can override this when created.
+      </p>
+      <div className="space-y-2">
+        <label className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${order === 'DESCENDING' ? 'border-blue-400 bg-blue-50' : 'border-gray-200 hover:bg-gray-50'}`}>
+          <input
+            type="radio"
+            name="ticketOrder"
+            value="DESCENDING"
+            checked={order === 'DESCENDING'}
+            onChange={() => selectOrder('DESCENDING')}
+            className="mt-0.5"
+          />
+          <div>
+            <p className="text-sm font-medium">Descending (99 → 0)</p>
+            <p className="text-xs text-gray-500">Fresh pack starts at the highest number. Most common.</p>
+          </div>
+        </label>
+        <label className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${order === 'ASCENDING' ? 'border-blue-400 bg-blue-50' : 'border-gray-200 hover:bg-gray-50'}`}>
+          <input
+            type="radio"
+            name="ticketOrder"
+            value="ASCENDING"
+            checked={order === 'ASCENDING'}
+            onChange={() => selectOrder('ASCENDING')}
+            className="mt-0.5"
+          />
+          <div>
+            <p className="text-sm font-medium">Ascending (0 → 99)</p>
+            <p className="text-xs text-gray-500">Fresh pack starts at 0 and counts up.</p>
+          </div>
+        </label>
+      </div>
+      {saved && <p className="text-emerald-600 text-xs mt-2">✓ Saved</p>}
+    </div>
+  )
+}
+
 function UsersPanel() {
   const qc = useQueryClient()
   const { data: users = [], isLoading } = useQuery({ queryKey: ['users'], queryFn: getUsers })
@@ -156,6 +221,7 @@ export default function Settings() {
     <div>
       <h2 className="text-lg font-semibold mb-4">Settings &amp; Users</h2>
       <SettingsPanel />
+      <TicketOrderPanel />
       <UsersPanel />
     </div>
   )

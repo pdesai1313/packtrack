@@ -537,7 +537,14 @@ export default function LiveScan() {
 
                     {/* Pack ID */}
                     <td className={`px-3 py-2.5 sticky left-9 z-10 ${stickyBg}`}>
-                      <p className="font-mono font-bold text-xs whitespace-nowrap text-gray-800">{ps.pack.packId}</p>
+                      <p className="font-mono font-bold text-xs whitespace-nowrap text-gray-800 flex items-center gap-1.5">
+                        {ps.pack.packId}
+                        {ps.pack.ticketOrder === 'ASCENDING' && (
+                          <span className="text-[9px] font-mono px-1 py-0.5 rounded bg-purple-100 text-purple-700" title="Ascending: tickets count up">
+                            0→{ps.pack.packSize - 1}
+                          </span>
+                        )}
+                      </p>
                       {ps.pack.gameName && (
                         <p className="text-gray-400 text-[10px] whitespace-nowrap mt-0.5">{ps.pack.gameName}</p>
                       )}

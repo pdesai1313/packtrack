@@ -106,6 +106,7 @@ model OrgSettings {
   id               Int      @id @default(autoincrement())
   orgId            Int      @unique @map("org_id")
   toleranceTickets Int      @default(2) @map("tolerance_tickets")
+  ticketOrder      String   @default("DESCENDING") @map("ticket_order")  // DESCENDING | ASCENDING — default for new packs
   updatedAt        DateTime @updatedAt @map("updated_at")
 
   org Organization @relation(fields: [orgId], references: [id])
@@ -122,6 +123,7 @@ model Pack {
   ticketValue   Float    @map("ticket_value")
   gameName      String?  @map("game_name")
   scannerNumber String   @map("scanner_number")
+  ticketOrder   String   @default("DESCENDING") @map("ticket_order")  // DESCENDING | ASCENDING — locks when first PackSale created
   active        Boolean  @default(true)
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")

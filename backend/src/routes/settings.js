@@ -18,6 +18,7 @@ router.get('/', verifyAccessToken, requireOrg, async (req, res) => {
 router.put('/', verifyAccessToken, requireOrg, requireRole('ADMIN'), async (req, res) => {
   const schema = z.object({
     toleranceTickets: z.number().int().min(0).max(100).optional(),
+    ticketOrder:      z.enum(['DESCENDING', 'ASCENDING']).optional(),
   })
   const result = schema.safeParse(req.body)
   if (!result.success) return res.status(400).json({ error: result.error.flatten() })
