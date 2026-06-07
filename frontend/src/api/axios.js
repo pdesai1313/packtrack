@@ -1,6 +1,9 @@
 import axios from 'axios'
 
-const api = axios.create({ baseURL: '/api' })
+// In production set VITE_API_URL to your backend (e.g. https://easylotto.onrender.com/api)
+// In dev (vite proxy or local backend) leave it unset to use the relative /api path
+const baseURL = import.meta.env.VITE_API_URL || '/api'
+const api = axios.create({ baseURL })
 
 export function getAccessToken() { return localStorage.getItem('accessToken') }
 export function setTokens(access, refresh) {
@@ -43,7 +46,7 @@ api.interceptors.response.use(
 
       try {
         const refreshToken = localStorage.getItem('refreshToken')
-        const { data } = await axios.post('/api/auth/refresh', { refreshToken })
+        const { data } = await axios.post(`${baseURL}/auth/refresh`, { refreshToken })
         setTokens(data.accessToken, data.refreshToken)
         processQueue(null)
         return api(original)
